@@ -1,0 +1,2254 @@
+{
+  "vulnerabilities": [
+    {
+      "id": "SNYK-JS-BASICFTP-20419408",
+      "title": "Regular Expression Denial of Service (ReDoS)",
+      "CVSSv3": "CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:N/I:N/A:H/E:P",
+      "credit": [
+        "NotAFlightRisk"
+      ],
+      "semver": {
+        "vulnerable": [
+          "<6.2.1"
+        ]
+      },
+      "exploit": "Proof of Concept",
+      "fixedIn": [
+        "6.2.1"
+      ],
+      "patches": [],
+      "insights": {
+        "triageAdvice": null
+      },
+      "language": "js",
+      "severity": "high",
+      "cvssScore": 8.2,
+      "functions": [],
+      "malicious": false,
+      "isDisputed": false,
+      "moduleName": "basic-ftp",
+      "references": [
+        {
+          "url": "https://github.com/patrickjuchli/basic-ftp/security/advisories/GHSA-c475-qrg2-pj4r",
+          "title": "GitHub Advisory"
+        },
+        {
+          "url": "https://github.com/patrickjuchli/basic-ftp/commit/d0d9e07c56e519587bb50532ac6eadbb0cb0cfe9",
+          "title": "GitHub Commit"
+        },
+        {
+          "url": "https://github.com/patrickjuchli/basic-ftp/releases/tag/v6.2.1",
+          "title": "GitHub Release"
+        }
+      ],
+      "cvssDetails": [
+        {
+          "assigner": "Red Hat",
+          "severity": "high",
+          "cvssV3Vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:H",
+          "cvssV3BaseScore": 7.5,
+          "modificationTime": "2026-10-01T05:47:35.322440Z"
+        }
+      ],
+      "cvssSources": [
+        {
+          "type": "primary",
+          "vector": "CVSS:4.0/AV:N/AC:L/AT:P/PR:N/UI:N/VC:N/VI:N/VA:H/SC:N/SI:N/SA:N/E:P",
+          "assigner": "Snyk",
+          "severity": "high",
+          "baseScore": 8.2,
+          "cvssVersion": "4.0",
+          "modificationTime": "2026-10-04T13:55:45.964855Z"
+        },
+        {
+          "type": "secondary",
+          "vector": "CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:N/I:N/A:H/E:P",
+          "assigner": "Snyk",
+          "severity": "medium",
+          "baseScore": 5.9,
+          "cvssVersion": "3.1",
+          "modificationTime": "2026-10-04T13:55:45.964855Z"
+        },
+        {
+          "type": "secondary",
+          "vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:H",
+          "assigner": "Red Hat",
+          "severity": "high",
+          "baseScore": 7.5,
+          "cvssVersion": "3.1",
+          "modificationTime": "2026-10-01T05:47:35.322440Z"
+        }
+      ],
+      "description": "## Overview\n[basic-ftp](https://www.npmjs.org/package/basic-ftp) is a FTP client for Node.js, supports FTPS over TLS, IPv6, Async/Await, and Typescript.\n\nAffected versions of this package are vulnerable to Regular Expression Denial of Service (ReDoS) via unanchored regular expressions in `Client.list()` (specifically in `parseListDOS.ts` and `parseListUnix.ts`). The regex patterns used to parse FTP directory listings lack anchoring and use unbounded quantifiers, causing catastrophic backtracking when a malicious FTP server returns a long line that cannot be matched. A single such line triggers O(n²) CPU work per character, allowing a server to block the Node.js event loop indefinitely.\n\n## Details\n\nDenial of Service (DoS) describes a family of attacks, all aimed at making a system inaccessible to its original and legitimate users. There are many types of DoS attacks, ranging from trying to clog the network pipes to the system by generating a large volume of traffic from many machines (a Distributed Denial of Service - DDoS - attack) to sending crafted requests that cause a system to crash or take a disproportional amount of time to process.\n\nThe Regular expression Denial of Service (ReDoS) is a type of Denial of Service attack. Regular expressions are incredibly powerful, but they aren't very intuitive and can ultimately end up making it easy for attackers to take your site down.\n\nLet’s take the following regular expression as an example:\n```js\nregex = /A(B|C+)+D/\n```\n\nThis regular expression accomplishes the following:\n- `A` The string must start with the letter 'A'\n- `(B|C+)+` The string must then follow the letter A with either the letter 'B' or some number of occurrences of the letter 'C' (the `+` matches one or more times). The `+` at the end of this section states that we can look for one or more matches of this section.\n- `D` Finally, we ensure this section of the string ends with a 'D'\n\nThe expression would match inputs such as `ABBD`, `ABCCCCD`, `ABCBCCCD` and `ACCCCCD`\n\nIt most cases, it doesn't take very long for a regex engine to find a match:\n\n```bash\n$ time node -e '/A(B|C+)+D/.test(\"ACCCCCCCCCCCCCCCCCCCCCCCCCCCCD\")'\n0.04s user 0.01s system 95% cpu 0.052 total\n\n$ time node -e '/A(B|C+)+D/.test(\"ACCCCCCCCCCCCCCCCCCCCCCCCCCCCX\")'\n1.79s user 0.02s system 99% cpu 1.812 total\n```\n\nThe entire process of testing it against a 30 characters long string takes around ~52ms. But when given an invalid string, it takes nearly two seconds to complete the test, over ten times as long as it took to test a valid string. The dramatic difference is due to the way regular expressions get evaluated.\n\nMost Regex engines will work very similarly (with minor differences). The engine will match the first possible way to accept the current character and proceed to the next one. If it then fails to match the next one, it will backtrack and see if there was another way to digest the previous character. If it goes too far down the rabbit hole only to find out the string doesn’t match in the end, and if many characters have multiple valid regex paths, the number of backtracking steps can become very large, resulting in what is known as _catastrophic backtracking_.\n\nLet's look at how our expression runs into this problem, using a shorter string: \"ACCCX\". While it seems fairly straightforward, there are still four different ways that the engine could match those three C's:\n1. CCC\n2. CC+C\n3. C+CC\n4. C+C+C.\n\nThe engine has to try each of those combinations to see if any of them potentially match against the expression. When you combine that with the other steps the engine must take, we can use [RegEx 101 debugger](https://regex101.com/debugger) to see the engine has to take a total of 38 steps before it can determine the string doesn't match.\n\nFrom there, the number of steps the engine must use to validate a string just continues to grow.\n\n| String | Number of C's | Number of steps |\n| -------|-------------:| -----:|\n| ACCCX | 3 | 38\n| ACCCCX | 4 | 71\n| ACCCCCX | 5 | 136\n| ACCCCCCCCCCCCCCX | 14 | 65,553\n\n\nBy the time the string includes 14 C's, the engine has to take over 65,000 steps just to see if the string is valid. These extreme situations can cause them to work very slowly (exponentially related to input size, as shown above), allowing an attacker to exploit this and can cause the service to excessively consume CPU, resulting in a Denial of Service.\n\n## Remediation\nUpgrade `basic-ftp` to version 6.2.1 or higher.\n## References\n- [GitHub Advisory](https://github.com/patrickjuchli/basic-ftp/security/advisories/GHSA-c475-qrg2-pj4r)\n- [GitHub Commit](https://github.com/patrickjuchli/basic-ftp/commit/d0d9e07c56e519587bb50532ac6eadbb0cb0cfe9)\n- [GitHub Release](https://github.com/patrickjuchli/basic-ftp/releases/tag/v6.2.1)\n",
+      "epssDetails": {
+        "percentile": "0.28596",
+        "probability": "0.00370",
+        "modelVersion": "v2026.06.15"
+      },
+      "identifiers": {
+        "CVE": [
+          "CVE-2026-102990"
+        ],
+        "CWE": [
+          "CWE-1333"
+        ],
+        "GHSA": [
+          "GHSA-c475-qrg2-pj4r"
+        ]
+      },
+      "packageName": "basic-ftp",
+      "proprietary": false,
+      "creationTime": "2026-10-04T13:55:45.498431Z",
+      "functions_new": [],
+      "alternativeIds": [],
+      "disclosureTime": "2026-10-01T14:42:42Z",
+      "exploitDetails": {
+        "sources": [
+          "Snyk"
+        ],
+        "maturityLevels": [
+          {
+            "type": "secondary",
+            "level": "Proof of Concept",
+            "format": "CVSSv3"
+          },
+          {
+            "type": "primary",
+            "level": "Proof of Concept",
+            "format": "CVSSv4"
+          }
+        ]
+      },
+      "packageManager": "npm",
+      "publicationTime": "2026-10-04T13:55:45.670830Z",
+      "severityBasedOn": "CVSS",
+      "modificationTime": "2026-10-04T13:55:45.964855Z",
+      "socialTrendAlert": false,
+      "severityWithCritical": "high",
+      "from": [
+        "juice-shop@20.4.0-SNAPSHOT",
+        "proxy-agent@8.0.2",
+        "pac-proxy-agent@9.1.0",
+        "get-uri@8.0.1",
+        "basic-ftp@5.3.1"
+      ],
+      "upgradePath": [],
+      "isUpgradable": false,
+      "isPatchable": false,
+      "name": "basic-ftp",
+      "version": "5.3.1"
+    },
+    {
+      "id": "SNYK-JS-EXPRESSJWT-575022",
+      "title": "Authorization Bypass",
+      "CVSSv3": "CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:H/I:H/A:N",
+      "credit": [
+        "IST Group"
+      ],
+      "semver": {
+        "vulnerable": [
+          "<6.0.0"
+        ]
+      },
+      "exploit": "Not Defined",
+      "fixedIn": [
+        "6.0.0"
+      ],
+      "patches": [],
+      "insights": {
+        "triageAdvice": null
+      },
+      "language": "js",
+      "severity": "high",
+      "cvssScore": 7.4,
+      "functions": [],
+      "malicious": false,
+      "isDisputed": false,
+      "moduleName": "express-jwt",
+      "references": [
+        {
+          "url": "https://github.com/auth0/express-jwt/commit/7ecab5f8f0cab5297c2b863596566eb0c019cdef",
+          "title": "GitHub Commit"
+        }
+      ],
+      "cvssDetails": [
+        {
+          "assigner": "NVD",
+          "severity": "critical",
+          "cvssV3Vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:N",
+          "cvssV3BaseScore": 9.1,
+          "modificationTime": "2024-03-11T09:50:28.870577Z"
+        }
+      ],
+      "cvssSources": [
+        {
+          "type": "primary",
+          "vector": "CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:H/I:H/A:N",
+          "assigner": "Snyk",
+          "severity": "high",
+          "baseScore": 7.4,
+          "cvssVersion": "3.1",
+          "modificationTime": "2026-10-10T17:45:15.715271Z"
+        },
+        {
+          "type": "secondary",
+          "vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:N",
+          "assigner": "NVD",
+          "severity": "critical",
+          "baseScore": 9.1,
+          "cvssVersion": "3.1",
+          "modificationTime": "2024-03-11T09:50:28.870577Z"
+        }
+      ],
+      "description": "## Overview\n[express-jwt](https://www.npmjs.com/package/express-jwt) is a JWT authentication middleware.\n\nAffected versions of this package are vulnerable to Authorization Bypass. The `algorithms` entry to be specified in the configuration is not being enforced. When `algorithms` is not specified in the configuration, with the combination of `jwks-rsa`, it may lead to authorization bypass.\n## Remediation\nUpgrade `express-jwt` to version 6.0.0 or higher.\n## References\n- [GitHub Commit](https://github.com/auth0/express-jwt/commit/7ecab5f8f0cab5297c2b863596566eb0c019cdef)\n",
+      "epssDetails": {
+        "percentile": "0.67861",
+        "probability": "0.01221",
+        "modelVersion": "v2026.06.15"
+      },
+      "identifiers": {
+        "CVE": [
+          "CVE-2020-15084"
+        ],
+        "CWE": [
+          "CWE-285"
+        ],
+        "GHSA": [
+          "GHSA-6g6m-m6h5-w9gf"
+        ]
+      },
+      "packageName": "express-jwt",
+      "proprietary": false,
+      "creationTime": "2020-07-01T09:33:11.790635Z",
+      "functions_new": [],
+      "alternativeIds": [],
+      "disclosureTime": "2020-07-01T09:30:03Z",
+      "exploitDetails": {
+        "sources": [],
+        "maturityLevels": [
+          {
+            "type": "secondary",
+            "level": "Not Defined",
+            "format": "CVSSv3"
+          },
+          {
+            "type": "primary",
+            "level": "Not Defined",
+            "format": "CVSSv4"
+          }
+        ]
+      },
+      "packageManager": "npm",
+      "publicationTime": "2020-07-01T15:32:36Z",
+      "severityBasedOn": "CVSS",
+      "modificationTime": "2026-10-10T17:45:15.715271Z",
+      "socialTrendAlert": false,
+      "severityWithCritical": "high",
+      "from": [
+        "juice-shop@20.4.0-SNAPSHOT",
+        "express-jwt@3.0.0"
+      ],
+      "upgradePath": [
+        false,
+        "express-jwt@6.0.0"
+      ],
+      "isUpgradable": true,
+      "isPatchable": false,
+      "name": "express-jwt",
+      "version": "3.0.0"
+    },
+    {
+      "id": "SNYK-JS-HBS-1566555",
+      "title": "Information Exposure",
+      "CVSSv3": "CVSS:3.1/AV:N/AC:H/PR:N/UI:R/S:C/C:L/I:N/A:N/E:P",
+      "credit": [
+        "Agustin Gianni"
+      ],
+      "semver": {
+        "vulnerable": [
+          "*"
+        ]
+      },
+      "exploit": "Proof of Concept",
+      "fixedIn": [],
+      "patches": [],
+      "insights": {
+        "triageAdvice": null
+      },
+      "language": "js",
+      "severity": "low",
+      "cvssScore": 3.4,
+      "functions": [],
+      "malicious": false,
+      "isDisputed": false,
+      "moduleName": "hbs",
+      "references": [
+        {
+          "url": "https://securitylab.github.com/advisories/GHSL-2021-020-pillarjs-hbs/",
+          "title": "PoC and Explanation"
+        }
+      ],
+      "cvssDetails": [
+        {
+          "assigner": "NVD",
+          "severity": "medium",
+          "cvssV3Vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:L/I:N/A:N",
+          "cvssV3BaseScore": 5.3,
+          "modificationTime": "2024-03-11T09:50:48.662388Z"
+        }
+      ],
+      "cvssSources": [
+        {
+          "type": "primary",
+          "vector": "CVSS:3.1/AV:N/AC:H/PR:N/UI:R/S:C/C:L/I:N/A:N/E:P",
+          "assigner": "Snyk",
+          "severity": "low",
+          "baseScore": 3.4,
+          "cvssVersion": "3.1",
+          "modificationTime": "2026-10-31T14:03:15.660209Z"
+        },
+        {
+          "type": "secondary",
+          "vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:L/I:N/A:N",
+          "assigner": "NVD",
+          "severity": "medium",
+          "baseScore": 5.3,
+          "cvssVersion": "3.1",
+          "modificationTime": "2024-03-11T09:50:48.662388Z"
+        }
+      ],
+      "description": "## Overview\n[hbs](https://www.npmjs.org/package/hbs) is an Express.js template engine plugin for Handlebars\n\nAffected versions of this package are vulnerable to Information Exposure. `hbs` mixes pure template data with engine configuration options through the `Express` render API. By overwriting internal configuration options a file disclosure vulnerability may be triggered in downstream applications.\n## Remediation\nThere is no fixed version for `hbs`.\n## References\n- [PoC and Explanation](https://securitylab.github.com/advisories/GHSL-2021-020-pillarjs-hbs/)\n",
+      "epssDetails": {
+        "percentile": "0.62298",
+        "probability": "0.00982",
+        "modelVersion": "v2026.06.15"
+      },
+      "identifiers": {
+        "CVE": [
+          "CVE-2021-32822"
+        ],
+        "CWE": [
+          "CWE-200"
+        ],
+        "GHSL": [
+          "GHSL-2021-020"
+        ]
+      },
+      "packageName": "hbs",
+      "proprietary": false,
+      "creationTime": "2021-08-17T11:02:48.815315Z",
+      "functions_new": [],
+      "alternativeIds": [],
+      "disclosureTime": "2021-08-17T10:50:41Z",
+      "exploitDetails": {
+        "sources": [
+          "Snyk"
+        ],
+        "maturityLevels": [
+          {
+            "type": "secondary",
+            "level": "Proof of Concept",
+            "format": "CVSSv3"
+          },
+          {
+            "type": "primary",
+            "level": "Proof of Concept",
+            "format": "CVSSv4"
+          }
+        ]
+      },
+      "packageManager": "npm",
+      "publicationTime": "2021-08-17T14:14:00.465869Z",
+      "severityBasedOn": "CVSS",
+      "modificationTime": "2026-10-31T14:03:15.660209Z",
+      "socialTrendAlert": false,
+      "severityWithCritical": "low",
+      "from": [
+        "juice-shop@20.4.0-SNAPSHOT",
+        "hbs@4.4.0"
+      ],
+      "upgradePath": [],
+      "isUpgradable": false,
+      "isPatchable": false,
+      "name": "hbs",
+      "version": "4.4.0"
+    },
+    {
+      "id": "SNYK-JS-JSONWEBTOKEN-3180022",
+      "title": "Improper Authentication",
+      "CVSSv3": "CVSS:3.1/AV:N/AC:H/PR:L/UI:N/S:U/C:L/I:H/A:L",
+      "credit": [
+        "Unknown"
+      ],
+      "semver": {
+        "vulnerable": [
+          "<9.0.0"
+        ]
+      },
+      "exploit": "Not Defined",
+      "fixedIn": [
+        "9.0.0"
+      ],
+      "patches": [],
+      "insights": {
+        "triageAdvice": null
+      },
+      "language": "js",
+      "severity": "medium",
+      "cvssScore": 6.4,
+      "functions": [],
+      "malicious": false,
+      "isDisputed": false,
+      "moduleName": "jsonwebtoken",
+      "references": [
+        {
+          "url": "https://github.com/auth0/node-jsonwebtoken/commit/e1fa9dcc12054a8681db4e6373da1b30cf7016e3",
+          "title": "GitHub Commit"
+        },
+        {
+          "url": "https://github.com/auth0/node-jsonwebtoken/releases/tag/v9.0.0",
+          "title": "GitHub Release"
+        }
+      ],
+      "cvssDetails": [
+        {
+          "assigner": "NVD",
+          "severity": "high",
+          "cvssV3Vector": "CVSS:3.1/AV:N/AC:L/PR:L/UI:N/S:U/C:L/I:H/A:L",
+          "cvssV3BaseScore": 7.6,
+          "modificationTime": "2024-03-11T09:52:56.598442Z"
+        }
+      ],
+      "cvssSources": [
+        {
+          "type": "primary",
+          "vector": "CVSS:3.1/AV:N/AC:H/PR:L/UI:N/S:U/C:L/I:H/A:L",
+          "assigner": "Snyk",
+          "severity": "medium",
+          "baseScore": 6.4,
+          "cvssVersion": "3.1",
+          "modificationTime": "2026-10-22T14:04:17.454890Z"
+        },
+        {
+          "type": "secondary",
+          "vector": "CVSS:3.1/AV:N/AC:L/PR:L/UI:N/S:U/C:L/I:H/A:L",
+          "assigner": "NVD",
+          "severity": "high",
+          "baseScore": 7.6,
+          "cvssVersion": "3.1",
+          "modificationTime": "2024-03-11T09:52:56.598442Z"
+        }
+      ],
+      "description": "## Overview\n[jsonwebtoken](https://github.com/auth0/node-jsonwebtoken) is a JSON Web Token implementation (symmetric and asymmetric)\n\nAffected versions of this package are vulnerable to Improper Authentication such that the lack of algorithm definition in the `jwt.verify()` function can lead to signature validation bypass due to defaulting to the `none` algorithm for signature verification. \r\n\r\n## Exploitability\r\nUsers are affected only if all of the following conditions are true for the `jwt.verify()` function:\r\n\r\n1) A token with no signature is received.\r\n\r\n2) No algorithms are specified.\r\n\r\n3) A falsy (e.g., `null`, `false`, `undefined`) secret or key is passed.\n## Remediation\nUpgrade `jsonwebtoken` to version 9.0.0 or higher.\n## References\n- [GitHub Commit](https://github.com/auth0/node-jsonwebtoken/commit/e1fa9dcc12054a8681db4e6373da1b30cf7016e3)\n- [GitHub Release](https://github.com/auth0/node-jsonwebtoken/releases/tag/v9.0.0)\n",
+      "epssDetails": {
+        "percentile": "0.46529",
+        "probability": "0.00572",
+        "modelVersion": "v2026.06.15"
+      },
+      "identifiers": {
+        "CVE": [
+          "CVE-2022-23540"
+        ],
+        "CWE": [
+          "CWE-287"
+        ],
+        "GHSA": [
+          "GHSA-qwph-4952-7xr6"
+        ]
+      },
+      "packageName": "jsonwebtoken",
+      "proprietary": false,
+      "creationTime": "2022-12-22T09:09:36.072853Z",
+      "functions_new": [],
+      "alternativeIds": [],
+      "disclosureTime": "2022-12-22T03:32:59Z",
+      "exploitDetails": {
+        "sources": [],
+        "maturityLevels": [
+          {
+            "type": "secondary",
+            "level": "Not Defined",
+            "format": "CVSSv3"
+          },
+          {
+            "type": "primary",
+            "level": "Not Defined",
+            "format": "CVSSv4"
+          }
+        ]
+      },
+      "packageManager": "npm",
+      "publicationTime": "2022-12-22T09:13:25.290846Z",
+      "severityBasedOn": "CVSS",
+      "modificationTime": "2026-10-22T14:04:17.454890Z",
+      "socialTrendAlert": false,
+      "severityWithCritical": "medium",
+      "from": [
+        "juice-shop@20.4.0-SNAPSHOT",
+        "jsonwebtoken@5.0.0"
+      ],
+      "upgradePath": [
+        false,
+        "jsonwebtoken@9.0.0"
+      ],
+      "isUpgradable": true,
+      "isPatchable": false,
+      "name": "jsonwebtoken",
+      "version": "5.0.0"
+    },
+    {
+      "id": "SNYK-JS-JSONWEBTOKEN-3180024",
+      "title": "Improper Restriction of Security Token Assignment",
+      "CVSSv3": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:L/I:L/A:N",
+      "credit": [
+        "Unknown"
+      ],
+      "semver": {
+        "vulnerable": [
+          "<9.0.0"
+        ]
+      },
+      "exploit": "Not Defined",
+      "fixedIn": [
+        "9.0.0"
+      ],
+      "patches": [],
+      "insights": {
+        "triageAdvice": null
+      },
+      "language": "js",
+      "severity": "medium",
+      "cvssScore": 6.5,
+      "functions": [],
+      "malicious": false,
+      "isDisputed": false,
+      "moduleName": "jsonwebtoken",
+      "references": [
+        {
+          "url": "https://github.com/auth0/node-jsonwebtoken/commit/e1fa9dcc12054a8681db4e6373da1b30cf7016e3",
+          "title": "GitHub Commit"
+        },
+        {
+          "url": "https://github.com/auth0/node-jsonwebtoken/releases/tag/v9.0.0",
+          "title": "GitHub Release"
+        }
+      ],
+      "cvssDetails": [
+        {
+          "assigner": "NVD",
+          "severity": "medium",
+          "cvssV3Vector": "CVSS:3.1/AV:N/AC:L/PR:L/UI:N/S:U/C:L/I:L/A:L",
+          "cvssV3BaseScore": 6.3,
+          "modificationTime": "2024-03-11T09:52:54.050914Z"
+        }
+      ],
+      "cvssSources": [
+        {
+          "type": "primary",
+          "vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:L/I:L/A:N",
+          "assigner": "Snyk",
+          "severity": "medium",
+          "baseScore": 6.5,
+          "cvssVersion": "3.1",
+          "modificationTime": "2026-10-26T14:03:03.137844Z"
+        },
+        {
+          "type": "secondary",
+          "vector": "CVSS:3.1/AV:N/AC:L/PR:L/UI:N/S:U/C:L/I:L/A:L",
+          "assigner": "NVD",
+          "severity": "medium",
+          "baseScore": 6.3,
+          "cvssVersion": "3.1",
+          "modificationTime": "2024-03-11T09:52:54.050914Z"
+        }
+      ],
+      "description": "## Overview\n[jsonwebtoken](https://github.com/auth0/node-jsonwebtoken) is a JSON Web Token implementation (symmetric and asymmetric)\n\nAffected versions of this package are vulnerable to Improper Restriction of Security Token Assignment via the `secretOrPublicKey ` argument due to misconfigurations of the key retrieval function `jwt.verify()`. Exploiting this vulnerability might result in incorrect verification of forged tokens when tokens signed with an asymmetric public key could be verified with a symmetric HS256 algorithm.\r\n\r\n**Note:**\r\nThis vulnerability affects your application if it supports the usage of both symmetric and asymmetric keys in `jwt.verify()` implementation with the same key retrieval function.\n## Remediation\nUpgrade `jsonwebtoken` to version 9.0.0 or higher.\n## References\n- [GitHub Commit](https://github.com/auth0/node-jsonwebtoken/commit/e1fa9dcc12054a8681db4e6373da1b30cf7016e3)\n- [GitHub Release](https://github.com/auth0/node-jsonwebtoken/releases/tag/v9.0.0)\n",
+      "epssDetails": {
+        "percentile": "0.56642",
+        "probability": "0.00810",
+        "modelVersion": "v2026.06.15"
+      },
+      "identifiers": {
+        "CVE": [
+          "CVE-2022-23541"
+        ],
+        "CWE": [
+          "CWE-1259"
+        ],
+        "GHSA": [
+          "GHSA-hjrf-2m68-5959"
+        ]
+      },
+      "packageName": "jsonwebtoken",
+      "proprietary": false,
+      "creationTime": "2022-12-22T09:14:27.155728Z",
+      "functions_new": [],
+      "alternativeIds": [],
+      "disclosureTime": "2022-12-22T03:33:19Z",
+      "exploitDetails": {
+        "sources": [],
+        "maturityLevels": [
+          {
+            "type": "secondary",
+            "level": "Not Defined",
+            "format": "CVSSv3"
+          },
+          {
+            "type": "primary",
+            "level": "Not Defined",
+            "format": "CVSSv4"
+          }
+        ]
+      },
+      "packageManager": "npm",
+      "publicationTime": "2022-12-22T09:16:03.621406Z",
+      "severityBasedOn": "CVSS",
+      "modificationTime": "2026-10-26T14:03:03.137844Z",
+      "socialTrendAlert": false,
+      "severityWithCritical": "medium",
+      "from": [
+        "juice-shop@20.4.0-SNAPSHOT",
+        "jsonwebtoken@5.0.0"
+      ],
+      "upgradePath": [
+        false,
+        "jsonwebtoken@9.0.0"
+      ],
+      "isUpgradable": true,
+      "isPatchable": false,
+      "name": "jsonwebtoken",
+      "version": "5.0.0"
+    },
+    {
+      "id": "SNYK-JS-JSONWEBTOKEN-3180026",
+      "title": "Use of a Broken or Risky Cryptographic Algorithm",
+      "CVSSv3": "CVSS:3.1/AV:N/AC:H/PR:L/UI:N/S:U/C:H/I:H/A:N",
+      "credit": [
+        "Unknown"
+      ],
+      "semver": {
+        "vulnerable": [
+          "<9.0.0"
+        ]
+      },
+      "exploit": "Not Defined",
+      "fixedIn": [
+        "9.0.0"
+      ],
+      "patches": [],
+      "insights": {
+        "triageAdvice": null
+      },
+      "language": "js",
+      "severity": "medium",
+      "cvssScore": 6.8,
+      "functions": [],
+      "malicious": false,
+      "isDisputed": false,
+      "moduleName": "jsonwebtoken",
+      "references": [
+        {
+          "url": "https://github.com/auth0/node-jsonwebtoken/commit/e1fa9dcc12054a8681db4e6373da1b30cf7016e3",
+          "title": "GitHub Commit"
+        },
+        {
+          "url": "https://github.com/auth0/node-jsonwebtoken/releases/tag/v9.0.0",
+          "title": "GitHub Release"
+        }
+      ],
+      "cvssDetails": [
+        {
+          "assigner": "NVD",
+          "severity": "high",
+          "cvssV3Vector": "CVSS:3.1/AV:N/AC:L/PR:L/UI:N/S:U/C:H/I:H/A:N",
+          "cvssV3BaseScore": 8.1,
+          "modificationTime": "2024-03-11T09:52:54.264450Z"
+        }
+      ],
+      "cvssSources": [
+        {
+          "type": "primary",
+          "vector": "CVSS:3.1/AV:N/AC:H/PR:L/UI:N/S:U/C:H/I:H/A:N",
+          "assigner": "Snyk",
+          "severity": "medium",
+          "baseScore": 6.8,
+          "cvssVersion": "3.1",
+          "modificationTime": "2026-10-31T14:02:16.741766Z"
+        },
+        {
+          "type": "secondary",
+          "vector": "CVSS:3.1/AV:N/AC:L/PR:L/UI:N/S:U/C:H/I:H/A:N",
+          "assigner": "NVD",
+          "severity": "high",
+          "baseScore": 8.1,
+          "cvssVersion": "3.1",
+          "modificationTime": "2024-03-11T09:52:54.264450Z"
+        }
+      ],
+      "description": "## Overview\n[jsonwebtoken](https://github.com/auth0/node-jsonwebtoken) is a JSON Web Token implementation (symmetric and asymmetric)\n\nAffected versions of this package are vulnerable to Use of a Broken or Risky Cryptographic Algorithm such that the library can be misconfigured to use legacy, insecure key types for signature verification. For example, DSA keys could be used with the RS256 algorithm. \r\n\r\n## Exploitability\r\n\r\nUsers are affected when using an algorithm and a key type _other_ than the combinations mentioned below:\r\n\r\nEC: ES256, ES384, ES512\r\n                  \r\nRSA: RS256, RS384, RS512, PS256, PS384, PS512 \r\n\r\nRSA-PSS: PS256, PS384, PS512                      \r\n\r\nAnd for Elliptic Curve algorithms:\r\n\r\nES256: prime256v1\r\n\r\nES384: secp384r1\r\n\r\nES512:  secp521r1 \r\n\r\n## Workaround \r\n\r\nUsers who are unable to upgrade to the fixed version can use the  `allowInvalidAsymmetricKeyTypes` option  to `true` in the `sign()` and `verify()` functions to continue usage of invalid key type/algorithm combination in 9.0.0 for legacy compatibility.\n## Remediation\nUpgrade `jsonwebtoken` to version 9.0.0 or higher.\n## References\n- [GitHub Commit](https://github.com/auth0/node-jsonwebtoken/commit/e1fa9dcc12054a8681db4e6373da1b30cf7016e3)\n- [GitHub Release](https://github.com/auth0/node-jsonwebtoken/releases/tag/v9.0.0)\n",
+      "epssDetails": {
+        "percentile": "0.44467",
+        "probability": "0.00524",
+        "modelVersion": "v2026.06.15"
+      },
+      "identifiers": {
+        "CVE": [
+          "CVE-2022-23539"
+        ],
+        "CWE": [
+          "CWE-327"
+        ],
+        "GHSA": [
+          "GHSA-8cf7-32gw-wr33"
+        ]
+      },
+      "packageName": "jsonwebtoken",
+      "proprietary": false,
+      "creationTime": "2022-12-22T09:19:03.430735Z",
+      "functions_new": [],
+      "alternativeIds": [],
+      "disclosureTime": "2022-12-22T03:32:22Z",
+      "exploitDetails": {
+        "sources": [],
+        "maturityLevels": [
+          {
+            "type": "secondary",
+            "level": "Not Defined",
+            "format": "CVSSv3"
+          },
+          {
+            "type": "primary",
+            "level": "Not Defined",
+            "format": "CVSSv4"
+          }
+        ]
+      },
+      "packageManager": "npm",
+      "publicationTime": "2022-12-22T10:32:50.173080Z",
+      "severityBasedOn": "CVSS",
+      "modificationTime": "2026-10-31T14:02:16.741766Z",
+      "socialTrendAlert": false,
+      "severityWithCritical": "medium",
+      "from": [
+        "juice-shop@20.4.0-SNAPSHOT",
+        "jsonwebtoken@5.0.0"
+      ],
+      "upgradePath": [
+        false,
+        "jsonwebtoken@9.0.0"
+      ],
+      "isUpgradable": true,
+      "isPatchable": false,
+      "name": "jsonwebtoken",
+      "version": "5.0.0"
+    },
+    {
+      "id": "SNYK-JS-JSONWEBTOKEN-3180022",
+      "title": "Improper Authentication",
+      "CVSSv3": "CVSS:3.1/AV:N/AC:H/PR:L/UI:N/S:U/C:L/I:H/A:L",
+      "credit": [
+        "Unknown"
+      ],
+      "semver": {
+        "vulnerable": [
+          "<9.0.0"
+        ]
+      },
+      "exploit": "Not Defined",
+      "fixedIn": [
+        "9.0.0"
+      ],
+      "patches": [],
+      "insights": {
+        "triageAdvice": null
+      },
+      "language": "js",
+      "severity": "medium",
+      "cvssScore": 6.4,
+      "functions": [],
+      "malicious": false,
+      "isDisputed": false,
+      "moduleName": "jsonwebtoken",
+      "references": [
+        {
+          "url": "https://github.com/auth0/node-jsonwebtoken/commit/e1fa9dcc12054a8681db4e6373da1b30cf7016e3",
+          "title": "GitHub Commit"
+        },
+        {
+          "url": "https://github.com/auth0/node-jsonwebtoken/releases/tag/v9.0.0",
+          "title": "GitHub Release"
+        }
+      ],
+      "cvssDetails": [
+        {
+          "assigner": "NVD",
+          "severity": "high",
+          "cvssV3Vector": "CVSS:3.1/AV:N/AC:L/PR:L/UI:N/S:U/C:L/I:H/A:L",
+          "cvssV3BaseScore": 7.6,
+          "modificationTime": "2024-03-11T09:52:56.598442Z"
+        }
+      ],
+      "cvssSources": [
+        {
+          "type": "primary",
+          "vector": "CVSS:3.1/AV:N/AC:H/PR:L/UI:N/S:U/C:L/I:H/A:L",
+          "assigner": "Snyk",
+          "severity": "medium",
+          "baseScore": 6.4,
+          "cvssVersion": "3.1",
+          "modificationTime": "2026-10-22T14:04:17.454890Z"
+        },
+        {
+          "type": "secondary",
+          "vector": "CVSS:3.1/AV:N/AC:L/PR:L/UI:N/S:U/C:L/I:H/A:L",
+          "assigner": "NVD",
+          "severity": "high",
+          "baseScore": 7.6,
+          "cvssVersion": "3.1",
+          "modificationTime": "2024-03-11T09:52:56.598442Z"
+        }
+      ],
+      "description": "## Overview\n[jsonwebtoken](https://github.com/auth0/node-jsonwebtoken) is a JSON Web Token implementation (symmetric and asymmetric)\n\nAffected versions of this package are vulnerable to Improper Authentication such that the lack of algorithm definition in the `jwt.verify()` function can lead to signature validation bypass due to defaulting to the `none` algorithm for signature verification. \r\n\r\n## Exploitability\r\nUsers are affected only if all of the following conditions are true for the `jwt.verify()` function:\r\n\r\n1) A token with no signature is received.\r\n\r\n2) No algorithms are specified.\r\n\r\n3) A falsy (e.g., `null`, `false`, `undefined`) secret or key is passed.\n## Remediation\nUpgrade `jsonwebtoken` to version 9.0.0 or higher.\n## References\n- [GitHub Commit](https://github.com/auth0/node-jsonwebtoken/commit/e1fa9dcc12054a8681db4e6373da1b30cf7016e3)\n- [GitHub Release](https://github.com/auth0/node-jsonwebtoken/releases/tag/v9.0.0)\n",
+      "epssDetails": {
+        "percentile": "0.46529",
+        "probability": "0.00572",
+        "modelVersion": "v2026.06.15"
+      },
+      "identifiers": {
+        "CVE": [
+          "CVE-2022-23540"
+        ],
+        "CWE": [
+          "CWE-287"
+        ],
+        "GHSA": [
+          "GHSA-qwph-4952-7xr6"
+        ]
+      },
+      "packageName": "jsonwebtoken",
+      "proprietary": false,
+      "creationTime": "2022-12-22T09:09:36.072853Z",
+      "functions_new": [],
+      "alternativeIds": [],
+      "disclosureTime": "2022-12-22T03:32:59Z",
+      "exploitDetails": {
+        "sources": [],
+        "maturityLevels": [
+          {
+            "type": "secondary",
+            "level": "Not Defined",
+            "format": "CVSSv3"
+          },
+          {
+            "type": "primary",
+            "level": "Not Defined",
+            "format": "CVSSv4"
+          }
+        ]
+      },
+      "packageManager": "npm",
+      "publicationTime": "2022-12-22T09:13:25.290846Z",
+      "severityBasedOn": "CVSS",
+      "modificationTime": "2026-10-22T14:04:17.454890Z",
+      "socialTrendAlert": false,
+      "severityWithCritical": "medium",
+      "from": [
+        "juice-shop@20.4.0-SNAPSHOT",
+        "express-jwt@3.0.0",
+        "jsonwebtoken@5.0.0"
+      ],
+      "upgradePath": [
+        false,
+        "express-jwt@7.7.8",
+        "jsonwebtoken@9.0.3"
+      ],
+      "isUpgradable": true,
+      "isPatchable": false,
+      "name": "jsonwebtoken",
+      "version": "5.0.0"
+    },
+    {
+      "id": "SNYK-JS-JSONWEBTOKEN-3180024",
+      "title": "Improper Restriction of Security Token Assignment",
+      "CVSSv3": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:L/I:L/A:N",
+      "credit": [
+        "Unknown"
+      ],
+      "semver": {
+        "vulnerable": [
+          "<9.0.0"
+        ]
+      },
+      "exploit": "Not Defined",
+      "fixedIn": [
+        "9.0.0"
+      ],
+      "patches": [],
+      "insights": {
+        "triageAdvice": null
+      },
+      "language": "js",
+      "severity": "medium",
+      "cvssScore": 6.5,
+      "functions": [],
+      "malicious": false,
+      "isDisputed": false,
+      "moduleName": "jsonwebtoken",
+      "references": [
+        {
+          "url": "https://github.com/auth0/node-jsonwebtoken/commit/e1fa9dcc12054a8681db4e6373da1b30cf7016e3",
+          "title": "GitHub Commit"
+        },
+        {
+          "url": "https://github.com/auth0/node-jsonwebtoken/releases/tag/v9.0.0",
+          "title": "GitHub Release"
+        }
+      ],
+      "cvssDetails": [
+        {
+          "assigner": "NVD",
+          "severity": "medium",
+          "cvssV3Vector": "CVSS:3.1/AV:N/AC:L/PR:L/UI:N/S:U/C:L/I:L/A:L",
+          "cvssV3BaseScore": 6.3,
+          "modificationTime": "2024-03-11T09:52:54.050914Z"
+        }
+      ],
+      "cvssSources": [
+        {
+          "type": "primary",
+          "vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:L/I:L/A:N",
+          "assigner": "Snyk",
+          "severity": "medium",
+          "baseScore": 6.5,
+          "cvssVersion": "3.1",
+          "modificationTime": "2026-10-26T14:03:03.137844Z"
+        },
+        {
+          "type": "secondary",
+          "vector": "CVSS:3.1/AV:N/AC:L/PR:L/UI:N/S:U/C:L/I:L/A:L",
+          "assigner": "NVD",
+          "severity": "medium",
+          "baseScore": 6.3,
+          "cvssVersion": "3.1",
+          "modificationTime": "2024-03-11T09:52:54.050914Z"
+        }
+      ],
+      "description": "## Overview\n[jsonwebtoken](https://github.com/auth0/node-jsonwebtoken) is a JSON Web Token implementation (symmetric and asymmetric)\n\nAffected versions of this package are vulnerable to Improper Restriction of Security Token Assignment via the `secretOrPublicKey ` argument due to misconfigurations of the key retrieval function `jwt.verify()`. Exploiting this vulnerability might result in incorrect verification of forged tokens when tokens signed with an asymmetric public key could be verified with a symmetric HS256 algorithm.\r\n\r\n**Note:**\r\nThis vulnerability affects your application if it supports the usage of both symmetric and asymmetric keys in `jwt.verify()` implementation with the same key retrieval function.\n## Remediation\nUpgrade `jsonwebtoken` to version 9.0.0 or higher.\n## References\n- [GitHub Commit](https://github.com/auth0/node-jsonwebtoken/commit/e1fa9dcc12054a8681db4e6373da1b30cf7016e3)\n- [GitHub Release](https://github.com/auth0/node-jsonwebtoken/releases/tag/v9.0.0)\n",
+      "epssDetails": {
+        "percentile": "0.56642",
+        "probability": "0.00810",
+        "modelVersion": "v2026.06.15"
+      },
+      "identifiers": {
+        "CVE": [
+          "CVE-2022-23541"
+        ],
+        "CWE": [
+          "CWE-1259"
+        ],
+        "GHSA": [
+          "GHSA-hjrf-2m68-5959"
+        ]
+      },
+      "packageName": "jsonwebtoken",
+      "proprietary": false,
+      "creationTime": "2022-12-22T09:14:27.155728Z",
+      "functions_new": [],
+      "alternativeIds": [],
+      "disclosureTime": "2022-12-22T03:33:19Z",
+      "exploitDetails": {
+        "sources": [],
+        "maturityLevels": [
+          {
+            "type": "secondary",
+            "level": "Not Defined",
+            "format": "CVSSv3"
+          },
+          {
+            "type": "primary",
+            "level": "Not Defined",
+            "format": "CVSSv4"
+          }
+        ]
+      },
+      "packageManager": "npm",
+      "publicationTime": "2022-12-22T09:16:03.621406Z",
+      "severityBasedOn": "CVSS",
+      "modificationTime": "2026-10-26T14:03:03.137844Z",
+      "socialTrendAlert": false,
+      "severityWithCritical": "medium",
+      "from": [
+        "juice-shop@20.4.0-SNAPSHOT",
+        "express-jwt@3.0.0",
+        "jsonwebtoken@5.0.0"
+      ],
+      "upgradePath": [
+        false,
+        "express-jwt@7.7.8",
+        "jsonwebtoken@9.0.3"
+      ],
+      "isUpgradable": true,
+      "isPatchable": false,
+      "name": "jsonwebtoken",
+      "version": "5.0.0"
+    },
+    {
+      "id": "SNYK-JS-JSONWEBTOKEN-3180026",
+      "title": "Use of a Broken or Risky Cryptographic Algorithm",
+      "CVSSv3": "CVSS:3.1/AV:N/AC:H/PR:L/UI:N/S:U/C:H/I:H/A:N",
+      "credit": [
+        "Unknown"
+      ],
+      "semver": {
+        "vulnerable": [
+          "<9.0.0"
+        ]
+      },
+      "exploit": "Not Defined",
+      "fixedIn": [
+        "9.0.0"
+      ],
+      "patches": [],
+      "insights": {
+        "triageAdvice": null
+      },
+      "language": "js",
+      "severity": "medium",
+      "cvssScore": 6.8,
+      "functions": [],
+      "malicious": false,
+      "isDisputed": false,
+      "moduleName": "jsonwebtoken",
+      "references": [
+        {
+          "url": "https://github.com/auth0/node-jsonwebtoken/commit/e1fa9dcc12054a8681db4e6373da1b30cf7016e3",
+          "title": "GitHub Commit"
+        },
+        {
+          "url": "https://github.com/auth0/node-jsonwebtoken/releases/tag/v9.0.0",
+          "title": "GitHub Release"
+        }
+      ],
+      "cvssDetails": [
+        {
+          "assigner": "NVD",
+          "severity": "high",
+          "cvssV3Vector": "CVSS:3.1/AV:N/AC:L/PR:L/UI:N/S:U/C:H/I:H/A:N",
+          "cvssV3BaseScore": 8.1,
+          "modificationTime": "2024-03-11T09:52:54.264450Z"
+        }
+      ],
+      "cvssSources": [
+        {
+          "type": "primary",
+          "vector": "CVSS:3.1/AV:N/AC:H/PR:L/UI:N/S:U/C:H/I:H/A:N",
+          "assigner": "Snyk",
+          "severity": "medium",
+          "baseScore": 6.8,
+          "cvssVersion": "3.1",
+          "modificationTime": "2026-10-31T14:02:16.741766Z"
+        },
+        {
+          "type": "secondary",
+          "vector": "CVSS:3.1/AV:N/AC:L/PR:L/UI:N/S:U/C:H/I:H/A:N",
+          "assigner": "NVD",
+          "severity": "high",
+          "baseScore": 8.1,
+          "cvssVersion": "3.1",
+          "modificationTime": "2024-03-11T09:52:54.264450Z"
+        }
+      ],
+      "description": "## Overview\n[jsonwebtoken](https://github.com/auth0/node-jsonwebtoken) is a JSON Web Token implementation (symmetric and asymmetric)\n\nAffected versions of this package are vulnerable to Use of a Broken or Risky Cryptographic Algorithm such that the library can be misconfigured to use legacy, insecure key types for signature verification. For example, DSA keys could be used with the RS256 algorithm. \r\n\r\n## Exploitability\r\n\r\nUsers are affected when using an algorithm and a key type _other_ than the combinations mentioned below:\r\n\r\nEC: ES256, ES384, ES512\r\n                  \r\nRSA: RS256, RS384, RS512, PS256, PS384, PS512 \r\n\r\nRSA-PSS: PS256, PS384, PS512                      \r\n\r\nAnd for Elliptic Curve algorithms:\r\n\r\nES256: prime256v1\r\n\r\nES384: secp384r1\r\n\r\nES512:  secp521r1 \r\n\r\n## Workaround \r\n\r\nUsers who are unable to upgrade to the fixed version can use the  `allowInvalidAsymmetricKeyTypes` option  to `true` in the `sign()` and `verify()` functions to continue usage of invalid key type/algorithm combination in 9.0.0 for legacy compatibility.\n## Remediation\nUpgrade `jsonwebtoken` to version 9.0.0 or higher.\n## References\n- [GitHub Commit](https://github.com/auth0/node-jsonwebtoken/commit/e1fa9dcc12054a8681db4e6373da1b30cf7016e3)\n- [GitHub Release](https://github.com/auth0/node-jsonwebtoken/releases/tag/v9.0.0)\n",
+      "epssDetails": {
+        "percentile": "0.44467",
+        "probability": "0.00524",
+        "modelVersion": "v2026.06.15"
+      },
+      "identifiers": {
+        "CVE": [
+          "CVE-2022-23539"
+        ],
+        "CWE": [
+          "CWE-327"
+        ],
+        "GHSA": [
+          "GHSA-8cf7-32gw-wr33"
+        ]
+      },
+      "packageName": "jsonwebtoken",
+      "proprietary": false,
+      "creationTime": "2022-12-22T09:19:03.430735Z",
+      "functions_new": [],
+      "alternativeIds": [],
+      "disclosureTime": "2022-12-22T03:32:22Z",
+      "exploitDetails": {
+        "sources": [],
+        "maturityLevels": [
+          {
+            "type": "secondary",
+            "level": "Not Defined",
+            "format": "CVSSv3"
+          },
+          {
+            "type": "primary",
+            "level": "Not Defined",
+            "format": "CVSSv4"
+          }
+        ]
+      },
+      "packageManager": "npm",
+      "publicationTime": "2022-12-22T10:32:50.173080Z",
+      "severityBasedOn": "CVSS",
+      "modificationTime": "2026-10-31T14:02:16.741766Z",
+      "socialTrendAlert": false,
+      "severityWithCritical": "medium",
+      "from": [
+        "juice-shop@20.4.0-SNAPSHOT",
+        "express-jwt@3.0.0",
+        "jsonwebtoken@5.0.0"
+      ],
+      "upgradePath": [
+        false,
+        "express-jwt@7.7.8",
+        "jsonwebtoken@9.0.3"
+      ],
+      "isUpgradable": true,
+      "isPatchable": false,
+      "name": "jsonwebtoken",
+      "version": "5.0.0"
+    },
+    {
+      "id": "SNYK-JS-MARSDB-480405",
+      "title": "Arbitrary Code Injection",
+      "CVSSv3": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H",
+      "credit": [
+        "Francois Gauthier"
+      ],
+      "semver": {
+        "vulnerable": [
+          "*"
+        ]
+      },
+      "exploit": "Not Defined",
+      "fixedIn": [],
+      "patches": [],
+      "insights": {
+        "triageAdvice": null
+      },
+      "language": "js",
+      "severity": "critical",
+      "cvssScore": 9.8,
+      "functions": [],
+      "malicious": false,
+      "isDisputed": false,
+      "moduleName": "marsdb",
+      "references": [
+        {
+          "url": "https://www.npmjs.com/advisories/1122",
+          "title": "NPM Security Advisory"
+        }
+      ],
+      "cvssDetails": [],
+      "cvssSources": [
+        {
+          "type": "primary",
+          "vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H",
+          "assigner": "Snyk",
+          "severity": "critical",
+          "baseScore": 9.8,
+          "cvssVersion": "3.1",
+          "modificationTime": "2026-05-21T02:01:36.168815Z"
+        }
+      ],
+      "description": "## Overview\n[marsdb](https://github.com/c58/marsdb) is a MarsDB is a lightweight client-side database.\n\nAffected versions of this package are vulnerable to Arbitrary Code Injection. In the `DocumentMatcher` class, selectors on `$where` clauses are passed to a Function constructor unsanitized. This allows attackers to run arbitrary commands in the system when the function is executed.\n## Remediation\nThere is no fixed version for `marsdb`.\n## References\n- [NPM Security Advisory](https://www.npmjs.com/advisories/1122)\n",
+      "epssDetails": null,
+      "identifiers": {
+        "CVE": [],
+        "CWE": [
+          "CWE-94"
+        ],
+        "NSP": [
+          "1122"
+        ],
+        "GHSA": [
+          "GHSA-5mrr-rgp6-x4gr"
+        ]
+      },
+      "packageName": "marsdb",
+      "proprietary": false,
+      "creationTime": "2019-11-06T09:43:57.923159Z",
+      "functions_new": [],
+      "alternativeIds": [],
+      "disclosureTime": "2019-08-29T17:53:27Z",
+      "exploitDetails": {
+        "sources": [],
+        "maturityLevels": [
+          {
+            "type": "secondary",
+            "level": "Not Defined",
+            "format": "CVSSv3"
+          },
+          {
+            "type": "primary",
+            "level": "Not Defined",
+            "format": "CVSSv4"
+          }
+        ]
+      },
+      "packageManager": "npm",
+      "publicationTime": "2019-11-06T11:41:52Z",
+      "severityBasedOn": "CVSS",
+      "modificationTime": "2026-05-21T02:01:36.168815Z",
+      "socialTrendAlert": false,
+      "severityWithCritical": "critical",
+      "from": [
+        "juice-shop@20.4.0-SNAPSHOT",
+        "marsdb@0.6.11"
+      ],
+      "upgradePath": [],
+      "isUpgradable": false,
+      "isPatchable": false,
+      "name": "marsdb",
+      "version": "0.6.11"
+    },
+    {
+      "id": "SNYK-JS-NOTEVIL-2385946",
+      "title": "Sandbox Bypass",
+      "CVSSv3": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:L/I:L/A:N/E:P",
+      "credit": [
+        "Cristian-Alexandru Staicu",
+        "Abdullah Alhamdan"
+      ],
+      "semver": {
+        "vulnerable": [
+          "*"
+        ]
+      },
+      "exploit": "Proof of Concept",
+      "fixedIn": [],
+      "patches": [],
+      "insights": {
+        "triageAdvice": null
+      },
+      "language": "js",
+      "severity": "medium",
+      "cvssScore": 6.5,
+      "functions": [],
+      "malicious": false,
+      "isDisputed": false,
+      "moduleName": "notevil",
+      "references": [],
+      "cvssDetails": [
+        {
+          "assigner": "NVD",
+          "severity": "medium",
+          "cvssV3Vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:L/I:L/A:N",
+          "cvssV3BaseScore": 6.5,
+          "modificationTime": "2024-03-11T09:49:30.708028Z"
+        }
+      ],
+      "cvssSources": [
+        {
+          "type": "primary",
+          "vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:L/I:L/A:N/E:P",
+          "assigner": "Snyk",
+          "severity": "medium",
+          "baseScore": 6.5,
+          "cvssVersion": "3.1",
+          "modificationTime": "2026-08-06T14:03:17.806603Z"
+        },
+        {
+          "type": "secondary",
+          "vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:L/I:L/A:N",
+          "assigner": "NVD",
+          "severity": "medium",
+          "baseScore": 6.5,
+          "cvssVersion": "3.1",
+          "modificationTime": "2024-03-11T09:49:30.708028Z"
+        }
+      ],
+      "description": "## Overview\n[notevil](https://www.npmjs.com/package/notevil) is a module uses esprima to parse the javascript AST then walks each node and evaluates the result\r\n**Note:**This package has been deprecated.\n\nAffected versions of this package are vulnerable to Sandbox Bypass. It is vulnerable to Sandbox Escape leading to Prototype pollution. The package fails to restrict access to the main context, allowing an attacker to add or modify an object's prototype.\r\n\r\n**Note:**  This vulnerability derives from an incomplete fix in [SNYK-JS-NOTEVIL-608878](https://security.snyk.io/vuln/SNYK-JS-NOTEVIL-608878).\r\n\r\n## PoC:\r\n```js\r\nvar safeEval = require('notevil')\r\n\r\nsafeEval(`  \r\nObject.defineProperty(({})[[\"__proto__\"]][[\"__proto__\"]], 'polluted', {\r\n  value: 'success'\r\n});`);\r\n\r\nconsole.log(polluted);\r\n```\n\n## Details\n\nPrototype Pollution is a vulnerability affecting JavaScript. Prototype Pollution refers to the ability to inject properties into existing JavaScript language construct prototypes, such as objects. JavaScript allows all Object attributes to be altered, including their magical attributes such as `__proto__`, `constructor` and `prototype`. An attacker manipulates these attributes to overwrite, or pollute, a JavaScript application object prototype of the base object by injecting other values.  Properties on the `Object.prototype` are then inherited by all the JavaScript objects through the prototype chain. When that happens, this leads to either denial of service by triggering JavaScript exceptions, or it tampers with the application source code to force the code path that the attacker injects, thereby leading to remote code execution.\n\nThere are two main ways in which the pollution of prototypes occurs:\n\n-   Unsafe `Object` recursive merge\n    \n-   Property definition by path\n    \n\n### Unsafe Object recursive merge\n\nThe logic of a vulnerable recursive merge function follows the following high-level model:\n```\nmerge (target, source)\n\n  foreach property of source\n\n    if property exists and is an object on both the target and the source\n\n      merge(target[property], source[property])\n\n    else\n\n      target[property] = source[property]\n```\n<br>  \n\nWhen the source object contains a property named `__proto__` defined with `Object.defineProperty()` , the condition that checks if the property exists and is an object on both the target and the source passes and the merge recurses with the target, being the prototype of `Object` and the source of `Object` as defined by the attacker. Properties are then copied on the `Object` prototype.\n\nClone operations are a special sub-class of unsafe recursive merges, which occur when a recursive merge is conducted on an empty object: `merge({},source)`.\n\n`lodash` and `Hoek` are examples of libraries susceptible to recursive merge attacks.\n\n### Property definition by path\n\nThere are a few JavaScript libraries that use an API to define property values on an object based on a given path. The function that is generally affected contains this signature: `theFunction(object, path, value)`\n\nIf the attacker can control the value of “path”, they can set this value to `__proto__.myValue`. `myValue` is then assigned to the prototype of the class of the object.\n\n## Types of attacks\n\nThere are a few methods by which Prototype Pollution can be manipulated:\n\n| Type |Origin  |Short description |\n|--|--|--|\n| **Denial of service (DoS)**|Client  |This is the most likely attack. <br>DoS occurs when `Object` holds generic functions that are implicitly called for various operations (for example, `toString` and `valueOf`). <br> The attacker pollutes `Object.prototype.someattr` and alters its state to an unexpected value such as `Int` or `Object`. In this case, the code fails and is likely to cause a denial of service.  <br>**For example:** if an attacker pollutes `Object.prototype.toString` by defining it as an integer, if the codebase at any point was reliant on `someobject.toString()` it would fail. |\n |**Remote Code Execution**|Client|Remote code execution is generally only possible in cases where the codebase evaluates a specific attribute of an object, and then executes that evaluation.<br>**For example:** `eval(someobject.someattr)`. In this case, if the attacker pollutes `Object.prototype.someattr` they are likely to be able to leverage this in order to execute code.|\n|**Property Injection**|Client|The attacker pollutes properties that the codebase relies on for their informative value, including security properties such as cookies or tokens.<br>  **For example:** if a codebase checks privileges for `someuser.isAdmin`, then when the attacker pollutes `Object.prototype.isAdmin` and sets it to equal `true`, they can then achieve admin privileges.|\n\n## Affected environments\n\nThe following environments are susceptible to a Prototype Pollution attack:\n\n-   Application server\n    \n-   Web server\n\n-   Web browser\n    \n\n## How to prevent\n\n1.  Freeze the prototype— use `Object.freeze (Object.prototype)`.\n    \n2.  Require schema validation of JSON input.\n    \n3.  Avoid using unsafe recursive merge functions.\n    \n4.  Consider using objects without prototypes (for example, `Object.create(null)`), breaking the prototype chain and preventing pollution.\n    \n5.  As a best practice use `Map` instead of `Object`.\n\n### For more information on this vulnerability type:\n\n[Arteau, Olivier. “JavaScript prototype pollution attack in NodeJS application.” GitHub, 26 May 2018](https://github.com/HoLyVieR/prototype-pollution-nsec18/blob/master/paper/JavaScript_prototype_pollution_attack_in_NodeJS.pdf)\n\n## Remediation\nThere is no fixed version for `notevil`.\n",
+      "epssDetails": {
+        "percentile": "0.59893",
+        "probability": "0.01013",
+        "modelVersion": "v2026.06.15"
+      },
+      "identifiers": {
+        "CVE": [
+          "CVE-2021-23771"
+        ],
+        "CWE": [
+          "CWE-1321",
+          "CWE-265"
+        ]
+      },
+      "packageName": "notevil",
+      "proprietary": true,
+      "creationTime": "2022-01-27T15:00:51.139678Z",
+      "functions_new": [],
+      "alternativeIds": [],
+      "disclosureTime": "2022-01-27T15:00:48Z",
+      "exploitDetails": {
+        "sources": [
+          "Snyk"
+        ],
+        "maturityLevels": [
+          {
+            "type": "secondary",
+            "level": "Proof of Concept",
+            "format": "CVSSv3"
+          },
+          {
+            "type": "primary",
+            "level": "Proof of Concept",
+            "format": "CVSSv4"
+          }
+        ]
+      },
+      "packageManager": "npm",
+      "publicationTime": "2022-02-14T16:21:53.819915Z",
+      "severityBasedOn": "CVSS",
+      "modificationTime": "2026-08-06T14:03:17.806603Z",
+      "socialTrendAlert": false,
+      "severityWithCritical": "medium",
+      "from": [
+        "juice-shop@20.4.0-SNAPSHOT",
+        "notevil@1.3.3"
+      ],
+      "upgradePath": [],
+      "isUpgradable": false,
+      "isPatchable": false,
+      "name": "notevil",
+      "version": "1.3.3"
+    },
+    {
+      "id": "SNYK-JS-UUID-16133035",
+      "title": "Improper Validation of Specified Index, Position, or Offset in Input",
+      "CVSSv3": "CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:N/I:L/A:N/E:P",
+      "credit": [
+        "0xStraw-Hat"
+      ],
+      "semver": {
+        "vulnerable": [
+          "<11.1.1",
+          ">=12.0.0 <14.0.0"
+        ]
+      },
+      "exploit": "Proof of Concept",
+      "fixedIn": [
+        "11.1.1",
+        "14.0.0"
+      ],
+      "patches": [],
+      "insights": {
+        "triageAdvice": null
+      },
+      "language": "js",
+      "severity": "medium",
+      "cvssScore": 6.3,
+      "functions": [],
+      "malicious": false,
+      "isDisputed": false,
+      "moduleName": "uuid",
+      "references": [
+        {
+          "url": "https://github.com/uuidjs/uuid/commit/32389c887c9e75f90442ee4cc95bbab0c4e8346e",
+          "title": "GitHub Commit"
+        },
+        {
+          "url": "https://github.com/uuidjs/uuid/commit/3d2c5b0342f0fcb52a5ac681c3d47c13e7444b34",
+          "title": "GitHub Commit"
+        },
+        {
+          "url": "https://github.com/uuidjs/uuid/releases/tag/v14.0.0",
+          "title": "GitHub Release"
+        }
+      ],
+      "cvssDetails": [
+        {
+          "assigner": "NVD",
+          "severity": "high",
+          "cvssV3Vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:H/A:N",
+          "cvssV3BaseScore": 7.5,
+          "modificationTime": "2026-05-12T01:14:02.230690Z"
+        },
+        {
+          "assigner": "Red Hat",
+          "severity": "medium",
+          "cvssV3Vector": "CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:N/I:L/A:L",
+          "cvssV3BaseScore": 4.8,
+          "modificationTime": "2026-05-08T12:59:51.566928Z"
+        }
+      ],
+      "cvssSources": [
+        {
+          "type": "primary",
+          "vector": "CVSS:4.0/AV:N/AC:L/AT:P/PR:N/UI:N/VC:N/VI:L/VA:N/SC:N/SI:N/SA:N/E:P",
+          "assigner": "Snyk",
+          "severity": "medium",
+          "baseScore": 6.3,
+          "cvssVersion": "4.0",
+          "modificationTime": "2026-10-25T14:12:26.263506Z"
+        },
+        {
+          "type": "secondary",
+          "vector": "CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:N/I:L/A:N/E:P",
+          "assigner": "Snyk",
+          "severity": "low",
+          "baseScore": 3.7,
+          "cvssVersion": "3.1",
+          "modificationTime": "2026-10-25T14:12:26.263506Z"
+        },
+        {
+          "type": "secondary",
+          "vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:H/A:N",
+          "assigner": "NVD",
+          "severity": "high",
+          "baseScore": 7.5,
+          "cvssVersion": "3.1",
+          "modificationTime": "2026-05-12T01:14:02.230690Z"
+        },
+        {
+          "type": "secondary",
+          "vector": "CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:N/I:L/A:L",
+          "assigner": "Red Hat",
+          "severity": "medium",
+          "baseScore": 4.8,
+          "cvssVersion": "3.1",
+          "modificationTime": "2026-05-08T12:59:51.566928Z"
+        }
+      ],
+      "description": "## Overview\n[uuid](https://github.com/kelektiv/node-uuid) is a RFC4122 (v1, v4, and v5) compliant UUID library.\n\nAffected versions of this package are vulnerable to Improper Validation of Specified Index, Position, or Offset in Input due to accepting external output buffers but not rejecting out-of-range writes (small `buf` or large `offset`). This inconsistency allows silent partial writes into caller-provided buffers.\n## PoC\n```\r\ncd /home/StrawHat/uuid\r\nnpm ci\r\nnpm run build\r\n\r\nnode --input-type=module -e \"\r\nimport {v4,v5,v6} from './dist-node/index.js';\r\nconst ns='6ba7b810-9dad-11d1-80b4-00c04fd430c8';\r\nfor (const [name,fn] of [\r\n  ['v4',()=>v4({},new Uint8Array(8),4)],\r\n  ['v5',()=>v5('x',ns,new Uint8Array(8),4)],\r\n  ['v6',()=>v6({},new Uint8Array(8),4)],\r\n]) {\r\n  try { fn(); console.log(name,'NO_THROW'); }\r\n  catch(e){ console.log(name,'THREW',e.name); }\r\n}\"\r\n```\n## Remediation\nUpgrade `uuid` to version 11.1.1, 14.0.0 or higher.\n## References\n- [GitHub Commit](https://github.com/uuidjs/uuid/commit/32389c887c9e75f90442ee4cc95bbab0c4e8346e)\n- [GitHub Commit](https://github.com/uuidjs/uuid/commit/3d2c5b0342f0fcb52a5ac681c3d47c13e7444b34)\n- [GitHub Release](https://github.com/uuidjs/uuid/releases/tag/v14.0.0)\n",
+      "epssDetails": {
+        "percentile": "0.28340",
+        "probability": "0.00350",
+        "modelVersion": "v2026.06.15"
+      },
+      "identifiers": {
+        "CVE": [
+          "CVE-2026-41907"
+        ],
+        "CWE": [
+          "CWE-1285"
+        ],
+        "GHSA": [
+          "GHSA-w5hq-g745-h8pq"
+        ]
+      },
+      "packageName": "uuid",
+      "proprietary": false,
+      "creationTime": "2026-04-23T08:34:15.552273Z",
+      "functions_new": [],
+      "alternativeIds": [],
+      "disclosureTime": "2026-04-18T21:00:00Z",
+      "exploitDetails": {
+        "sources": [
+          "Snyk"
+        ],
+        "maturityLevels": [
+          {
+            "type": "secondary",
+            "level": "Proof of Concept",
+            "format": "CVSSv3"
+          },
+          {
+            "type": "primary",
+            "level": "Proof of Concept",
+            "format": "CVSSv4"
+          }
+        ]
+      },
+      "packageManager": "npm",
+      "publicationTime": "2026-04-23T08:34:16.017476Z",
+      "severityBasedOn": "CVSS",
+      "modificationTime": "2026-10-25T14:12:26.263506Z",
+      "socialTrendAlert": false,
+      "severityWithCritical": "medium",
+      "from": [
+        "juice-shop@20.4.0-SNAPSHOT",
+        "sequelize@6.37.8",
+        "uuid@8.3.2"
+      ],
+      "upgradePath": [],
+      "isUpgradable": false,
+      "isPatchable": false,
+      "name": "uuid",
+      "version": "8.3.2"
+    }
+  ],
+  "ok": false,
+  "dependencyCount": 442,
+  "org": "jumratulnisah9-commits",
+  "policy": "# Snyk (https://snyk.io) policy file, patches or ignores known vulnerabilities.\nversion: v1.25.1\nignore: {}\npatch: {}\n",
+  "isPrivate": true,
+  "licensesPolicy": {
+    "severities": {},
+    "orgLicenseRules": {
+      "AGPL-1.0": {
+        "licenseType": "AGPL-1.0",
+        "severity": "high",
+        "instructions": ""
+      },
+      "AGPL-3.0": {
+        "licenseType": "AGPL-3.0",
+        "severity": "high",
+        "instructions": ""
+      },
+      "Artistic-1.0": {
+        "licenseType": "Artistic-1.0",
+        "severity": "medium",
+        "instructions": ""
+      },
+      "Artistic-2.0": {
+        "licenseType": "Artistic-2.0",
+        "severity": "medium",
+        "instructions": ""
+      },
+      "CDDL-1.0": {
+        "licenseType": "CDDL-1.0",
+        "severity": "medium",
+        "instructions": ""
+      },
+      "CPOL-1.02": {
+        "licenseType": "CPOL-1.02",
+        "severity": "high",
+        "instructions": ""
+      },
+      "EPL-1.0": {
+        "licenseType": "EPL-1.0",
+        "severity": "medium",
+        "instructions": ""
+      },
+      "GPL-2.0": {
+        "licenseType": "GPL-2.0",
+        "severity": "high",
+        "instructions": ""
+      },
+      "GPL-3.0": {
+        "licenseType": "GPL-3.0",
+        "severity": "high",
+        "instructions": ""
+      },
+      "LGPL-2.0": {
+        "licenseType": "LGPL-2.0",
+        "severity": "medium",
+        "instructions": ""
+      },
+      "LGPL-2.1": {
+        "licenseType": "LGPL-2.1",
+        "severity": "medium",
+        "instructions": ""
+      },
+      "LGPL-3.0": {
+        "licenseType": "LGPL-3.0",
+        "severity": "medium",
+        "instructions": ""
+      },
+      "MPL-1.1": {
+        "licenseType": "MPL-1.1",
+        "severity": "medium",
+        "instructions": ""
+      },
+      "MPL-2.0": {
+        "licenseType": "MPL-2.0",
+        "severity": "medium",
+        "instructions": ""
+      },
+      "MS-RL": {
+        "licenseType": "MS-RL",
+        "severity": "medium",
+        "instructions": ""
+      },
+      "SimPL-2.0": {
+        "licenseType": "SimPL-2.0",
+        "severity": "high",
+        "instructions": ""
+      }
+    }
+  },
+  "packageManager": "npm",
+  "projectId": "fa559296-2ff6-4d44-b02f-867c482d2f0a",
+  "ignoreSettings": {
+    "adminOnly": false,
+    "reasonRequired": false,
+    "disregardFilesystemIgnores": false,
+    "autoApproveIgnores": false,
+    "approvalWorkflowEnabled": false
+  },
+  "summary": "12 vulnerable dependency paths",
+  "remediation": {
+    "unresolved": [
+      {
+        "id": "SNYK-JS-BASICFTP-20419408",
+        "title": "Regular Expression Denial of Service (ReDoS)",
+        "CVSSv3": "CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:N/I:N/A:H/E:P",
+        "credit": [
+          "NotAFlightRisk"
+        ],
+        "semver": {
+          "vulnerable": [
+            "<6.2.1"
+          ]
+        },
+        "exploit": "Proof of Concept",
+        "fixedIn": [
+          "6.2.1"
+        ],
+        "patches": [],
+        "insights": {
+          "triageAdvice": null
+        },
+        "language": "js",
+        "severity": "high",
+        "cvssScore": 8.2,
+        "functions": [],
+        "malicious": false,
+        "isDisputed": false,
+        "moduleName": "basic-ftp",
+        "references": [
+          {
+            "url": "https://github.com/patrickjuchli/basic-ftp/security/advisories/GHSA-c475-qrg2-pj4r",
+            "title": "GitHub Advisory"
+          },
+          {
+            "url": "https://github.com/patrickjuchli/basic-ftp/commit/d0d9e07c56e519587bb50532ac6eadbb0cb0cfe9",
+            "title": "GitHub Commit"
+          },
+          {
+            "url": "https://github.com/patrickjuchli/basic-ftp/releases/tag/v6.2.1",
+            "title": "GitHub Release"
+          }
+        ],
+        "cvssDetails": [
+          {
+            "assigner": "Red Hat",
+            "severity": "high",
+            "cvssV3Vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:H",
+            "cvssV3BaseScore": 7.5,
+            "modificationTime": "2026-10-01T05:47:35.322440Z"
+          }
+        ],
+        "cvssSources": [
+          {
+            "type": "primary",
+            "vector": "CVSS:4.0/AV:N/AC:L/AT:P/PR:N/UI:N/VC:N/VI:N/VA:H/SC:N/SI:N/SA:N/E:P",
+            "assigner": "Snyk",
+            "severity": "high",
+            "baseScore": 8.2,
+            "cvssVersion": "4.0",
+            "modificationTime": "2026-10-04T13:55:45.964855Z"
+          },
+          {
+            "type": "secondary",
+            "vector": "CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:N/I:N/A:H/E:P",
+            "assigner": "Snyk",
+            "severity": "medium",
+            "baseScore": 5.9,
+            "cvssVersion": "3.1",
+            "modificationTime": "2026-10-04T13:55:45.964855Z"
+          },
+          {
+            "type": "secondary",
+            "vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:H",
+            "assigner": "Red Hat",
+            "severity": "high",
+            "baseScore": 7.5,
+            "cvssVersion": "3.1",
+            "modificationTime": "2026-10-01T05:47:35.322440Z"
+          }
+        ],
+        "description": "## Overview\n[basic-ftp](https://www.npmjs.org/package/basic-ftp) is a FTP client for Node.js, supports FTPS over TLS, IPv6, Async/Await, and Typescript.\n\nAffected versions of this package are vulnerable to Regular Expression Denial of Service (ReDoS) via unanchored regular expressions in `Client.list()` (specifically in `parseListDOS.ts` and `parseListUnix.ts`). The regex patterns used to parse FTP directory listings lack anchoring and use unbounded quantifiers, causing catastrophic backtracking when a malicious FTP server returns a long line that cannot be matched. A single such line triggers O(n²) CPU work per character, allowing a server to block the Node.js event loop indefinitely.\n\n## Details\n\nDenial of Service (DoS) describes a family of attacks, all aimed at making a system inaccessible to its original and legitimate users. There are many types of DoS attacks, ranging from trying to clog the network pipes to the system by generating a large volume of traffic from many machines (a Distributed Denial of Service - DDoS - attack) to sending crafted requests that cause a system to crash or take a disproportional amount of time to process.\n\nThe Regular expression Denial of Service (ReDoS) is a type of Denial of Service attack. Regular expressions are incredibly powerful, but they aren't very intuitive and can ultimately end up making it easy for attackers to take your site down.\n\nLet’s take the following regular expression as an example:\n```js\nregex = /A(B|C+)+D/\n```\n\nThis regular expression accomplishes the following:\n- `A` The string must start with the letter 'A'\n- `(B|C+)+` The string must then follow the letter A with either the letter 'B' or some number of occurrences of the letter 'C' (the `+` matches one or more times). The `+` at the end of this section states that we can look for one or more matches of this section.\n- `D` Finally, we ensure this section of the string ends with a 'D'\n\nThe expression would match inputs such as `ABBD`, `ABCCCCD`, `ABCBCCCD` and `ACCCCCD`\n\nIt most cases, it doesn't take very long for a regex engine to find a match:\n\n```bash\n$ time node -e '/A(B|C+)+D/.test(\"ACCCCCCCCCCCCCCCCCCCCCCCCCCCCD\")'\n0.04s user 0.01s system 95% cpu 0.052 total\n\n$ time node -e '/A(B|C+)+D/.test(\"ACCCCCCCCCCCCCCCCCCCCCCCCCCCCX\")'\n1.79s user 0.02s system 99% cpu 1.812 total\n```\n\nThe entire process of testing it against a 30 characters long string takes around ~52ms. But when given an invalid string, it takes nearly two seconds to complete the test, over ten times as long as it took to test a valid string. The dramatic difference is due to the way regular expressions get evaluated.\n\nMost Regex engines will work very similarly (with minor differences). The engine will match the first possible way to accept the current character and proceed to the next one. If it then fails to match the next one, it will backtrack and see if there was another way to digest the previous character. If it goes too far down the rabbit hole only to find out the string doesn’t match in the end, and if many characters have multiple valid regex paths, the number of backtracking steps can become very large, resulting in what is known as _catastrophic backtracking_.\n\nLet's look at how our expression runs into this problem, using a shorter string: \"ACCCX\". While it seems fairly straightforward, there are still four different ways that the engine could match those three C's:\n1. CCC\n2. CC+C\n3. C+CC\n4. C+C+C.\n\nThe engine has to try each of those combinations to see if any of them potentially match against the expression. When you combine that with the other steps the engine must take, we can use [RegEx 101 debugger](https://regex101.com/debugger) to see the engine has to take a total of 38 steps before it can determine the string doesn't match.\n\nFrom there, the number of steps the engine must use to validate a string just continues to grow.\n\n| String | Number of C's | Number of steps |\n| -------|-------------:| -----:|\n| ACCCX | 3 | 38\n| ACCCCX | 4 | 71\n| ACCCCCX | 5 | 136\n| ACCCCCCCCCCCCCCX | 14 | 65,553\n\n\nBy the time the string includes 14 C's, the engine has to take over 65,000 steps just to see if the string is valid. These extreme situations can cause them to work very slowly (exponentially related to input size, as shown above), allowing an attacker to exploit this and can cause the service to excessively consume CPU, resulting in a Denial of Service.\n\n## Remediation\nUpgrade `basic-ftp` to version 6.2.1 or higher.\n## References\n- [GitHub Advisory](https://github.com/patrickjuchli/basic-ftp/security/advisories/GHSA-c475-qrg2-pj4r)\n- [GitHub Commit](https://github.com/patrickjuchli/basic-ftp/commit/d0d9e07c56e519587bb50532ac6eadbb0cb0cfe9)\n- [GitHub Release](https://github.com/patrickjuchli/basic-ftp/releases/tag/v6.2.1)\n",
+        "epssDetails": {
+          "percentile": "0.28596",
+          "probability": "0.00370",
+          "modelVersion": "v2026.06.15"
+        },
+        "identifiers": {
+          "CVE": [
+            "CVE-2026-102990"
+          ],
+          "CWE": [
+            "CWE-1333"
+          ],
+          "GHSA": [
+            "GHSA-c475-qrg2-pj4r"
+          ]
+        },
+        "packageName": "basic-ftp",
+        "proprietary": false,
+        "creationTime": "2026-10-04T13:55:45.498431Z",
+        "functions_new": [],
+        "alternativeIds": [],
+        "disclosureTime": "2026-10-01T14:42:42Z",
+        "exploitDetails": {
+          "sources": [
+            "Snyk"
+          ],
+          "maturityLevels": [
+            {
+              "type": "secondary",
+              "level": "Proof of Concept",
+              "format": "CVSSv3"
+            },
+            {
+              "type": "primary",
+              "level": "Proof of Concept",
+              "format": "CVSSv4"
+            }
+          ]
+        },
+        "packageManager": "npm",
+        "publicationTime": "2026-10-04T13:55:45.670830Z",
+        "severityBasedOn": "CVSS",
+        "modificationTime": "2026-10-04T13:55:45.964855Z",
+        "socialTrendAlert": false,
+        "packagePopularityRank": 99,
+        "from": [
+          "juice-shop@20.4.0-SNAPSHOT",
+          "proxy-agent@8.0.2",
+          "pac-proxy-agent@9.1.0",
+          "get-uri@8.0.1",
+          "basic-ftp@5.3.1"
+        ],
+        "upgradePath": [],
+        "isUpgradable": false,
+        "isPatchable": false,
+        "isPinnable": false,
+        "isRuntime": false,
+        "name": "basic-ftp",
+        "version": "5.3.1",
+        "severityWithCritical": "high"
+      },
+      {
+        "id": "SNYK-JS-HBS-1566555",
+        "title": "Information Exposure",
+        "CVSSv3": "CVSS:3.1/AV:N/AC:H/PR:N/UI:R/S:C/C:L/I:N/A:N/E:P",
+        "credit": [
+          "Agustin Gianni"
+        ],
+        "semver": {
+          "vulnerable": [
+            "*"
+          ]
+        },
+        "exploit": "Proof of Concept",
+        "fixedIn": [],
+        "patches": [],
+        "insights": {
+          "triageAdvice": null
+        },
+        "language": "js",
+        "severity": "low",
+        "cvssScore": 3.4,
+        "functions": [],
+        "malicious": false,
+        "isDisputed": false,
+        "moduleName": "hbs",
+        "references": [
+          {
+            "url": "https://securitylab.github.com/advisories/GHSL-2021-020-pillarjs-hbs/",
+            "title": "PoC and Explanation"
+          }
+        ],
+        "cvssDetails": [
+          {
+            "assigner": "NVD",
+            "severity": "medium",
+            "cvssV3Vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:L/I:N/A:N",
+            "cvssV3BaseScore": 5.3,
+            "modificationTime": "2024-03-11T09:50:48.662388Z"
+          }
+        ],
+        "cvssSources": [
+          {
+            "type": "primary",
+            "vector": "CVSS:3.1/AV:N/AC:H/PR:N/UI:R/S:C/C:L/I:N/A:N/E:P",
+            "assigner": "Snyk",
+            "severity": "low",
+            "baseScore": 3.4,
+            "cvssVersion": "3.1",
+            "modificationTime": "2026-10-31T14:03:15.660209Z"
+          },
+          {
+            "type": "secondary",
+            "vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:L/I:N/A:N",
+            "assigner": "NVD",
+            "severity": "medium",
+            "baseScore": 5.3,
+            "cvssVersion": "3.1",
+            "modificationTime": "2024-03-11T09:50:48.662388Z"
+          }
+        ],
+        "description": "## Overview\n[hbs](https://www.npmjs.org/package/hbs) is an Express.js template engine plugin for Handlebars\n\nAffected versions of this package are vulnerable to Information Exposure. `hbs` mixes pure template data with engine configuration options through the `Express` render API. By overwriting internal configuration options a file disclosure vulnerability may be triggered in downstream applications.\n## Remediation\nThere is no fixed version for `hbs`.\n## References\n- [PoC and Explanation](https://securitylab.github.com/advisories/GHSL-2021-020-pillarjs-hbs/)\n",
+        "epssDetails": {
+          "percentile": "0.62298",
+          "probability": "0.00982",
+          "modelVersion": "v2026.06.15"
+        },
+        "identifiers": {
+          "CVE": [
+            "CVE-2021-32822"
+          ],
+          "CWE": [
+            "CWE-200"
+          ],
+          "GHSL": [
+            "GHSL-2021-020"
+          ]
+        },
+        "packageName": "hbs",
+        "proprietary": false,
+        "creationTime": "2021-08-17T11:02:48.815315Z",
+        "functions_new": [],
+        "alternativeIds": [],
+        "disclosureTime": "2021-08-17T10:50:41Z",
+        "exploitDetails": {
+          "sources": [
+            "Snyk"
+          ],
+          "maturityLevels": [
+            {
+              "type": "secondary",
+              "level": "Proof of Concept",
+              "format": "CVSSv3"
+            },
+            {
+              "type": "primary",
+              "level": "Proof of Concept",
+              "format": "CVSSv4"
+            }
+          ]
+        },
+        "packageManager": "npm",
+        "publicationTime": "2021-08-17T14:14:00.465869Z",
+        "severityBasedOn": "CVSS",
+        "modificationTime": "2026-10-31T14:03:15.660209Z",
+        "socialTrendAlert": false,
+        "packagePopularityRank": 99,
+        "from": [
+          "juice-shop@20.4.0-SNAPSHOT",
+          "hbs@4.4.0"
+        ],
+        "upgradePath": [],
+        "isUpgradable": false,
+        "isPatchable": false,
+        "isPinnable": false,
+        "isRuntime": false,
+        "name": "hbs",
+        "version": "4.4.0",
+        "severityWithCritical": "low"
+      },
+      {
+        "id": "SNYK-JS-MARSDB-480405",
+        "title": "Arbitrary Code Injection",
+        "CVSSv3": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H",
+        "credit": [
+          "Francois Gauthier"
+        ],
+        "semver": {
+          "vulnerable": [
+            "*"
+          ]
+        },
+        "exploit": "Not Defined",
+        "fixedIn": [],
+        "patches": [],
+        "insights": {
+          "triageAdvice": null
+        },
+        "language": "js",
+        "severity": "critical",
+        "cvssScore": 9.8,
+        "functions": [],
+        "malicious": false,
+        "isDisputed": false,
+        "moduleName": "marsdb",
+        "references": [
+          {
+            "url": "https://www.npmjs.com/advisories/1122",
+            "title": "NPM Security Advisory"
+          }
+        ],
+        "cvssDetails": [],
+        "cvssSources": [
+          {
+            "type": "primary",
+            "vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H",
+            "assigner": "Snyk",
+            "severity": "critical",
+            "baseScore": 9.8,
+            "cvssVersion": "3.1",
+            "modificationTime": "2026-05-21T02:01:36.168815Z"
+          }
+        ],
+        "description": "## Overview\n[marsdb](https://github.com/c58/marsdb) is a MarsDB is a lightweight client-side database.\n\nAffected versions of this package are vulnerable to Arbitrary Code Injection. In the `DocumentMatcher` class, selectors on `$where` clauses are passed to a Function constructor unsanitized. This allows attackers to run arbitrary commands in the system when the function is executed.\n## Remediation\nThere is no fixed version for `marsdb`.\n## References\n- [NPM Security Advisory](https://www.npmjs.com/advisories/1122)\n",
+        "epssDetails": null,
+        "identifiers": {
+          "CVE": [],
+          "CWE": [
+            "CWE-94"
+          ],
+          "NSP": [
+            "1122"
+          ],
+          "GHSA": [
+            "GHSA-5mrr-rgp6-x4gr"
+          ]
+        },
+        "packageName": "marsdb",
+        "proprietary": false,
+        "creationTime": "2019-11-06T09:43:57.923159Z",
+        "functions_new": [],
+        "alternativeIds": [],
+        "disclosureTime": "2019-08-29T17:53:27Z",
+        "exploitDetails": {
+          "sources": [],
+          "maturityLevels": [
+            {
+              "type": "secondary",
+              "level": "Not Defined",
+              "format": "CVSSv3"
+            },
+            {
+              "type": "primary",
+              "level": "Not Defined",
+              "format": "CVSSv4"
+            }
+          ]
+        },
+        "packageManager": "npm",
+        "publicationTime": "2019-11-06T11:41:52Z",
+        "severityBasedOn": "CVSS",
+        "modificationTime": "2026-05-21T02:01:36.168815Z",
+        "socialTrendAlert": false,
+        "packagePopularityRank": 98,
+        "from": [
+          "juice-shop@20.4.0-SNAPSHOT",
+          "marsdb@0.6.11"
+        ],
+        "upgradePath": [],
+        "isUpgradable": false,
+        "isPatchable": false,
+        "isPinnable": false,
+        "isRuntime": false,
+        "name": "marsdb",
+        "version": "0.6.11",
+        "severityWithCritical": "critical"
+      },
+      {
+        "id": "SNYK-JS-NOTEVIL-2385946",
+        "title": "Sandbox Bypass",
+        "CVSSv3": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:L/I:L/A:N/E:P",
+        "credit": [
+          "Cristian-Alexandru Staicu",
+          "Abdullah Alhamdan"
+        ],
+        "semver": {
+          "vulnerable": [
+            "*"
+          ]
+        },
+        "exploit": "Proof of Concept",
+        "fixedIn": [],
+        "patches": [],
+        "insights": {
+          "triageAdvice": null
+        },
+        "language": "js",
+        "severity": "medium",
+        "cvssScore": 6.5,
+        "functions": [],
+        "malicious": false,
+        "isDisputed": false,
+        "moduleName": "notevil",
+        "references": [],
+        "cvssDetails": [
+          {
+            "assigner": "NVD",
+            "severity": "medium",
+            "cvssV3Vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:L/I:L/A:N",
+            "cvssV3BaseScore": 6.5,
+            "modificationTime": "2024-03-11T09:49:30.708028Z"
+          }
+        ],
+        "cvssSources": [
+          {
+            "type": "primary",
+            "vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:L/I:L/A:N/E:P",
+            "assigner": "Snyk",
+            "severity": "medium",
+            "baseScore": 6.5,
+            "cvssVersion": "3.1",
+            "modificationTime": "2026-08-06T14:03:17.806603Z"
+          },
+          {
+            "type": "secondary",
+            "vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:L/I:L/A:N",
+            "assigner": "NVD",
+            "severity": "medium",
+            "baseScore": 6.5,
+            "cvssVersion": "3.1",
+            "modificationTime": "2024-03-11T09:49:30.708028Z"
+          }
+        ],
+        "description": "## Overview\n[notevil](https://www.npmjs.com/package/notevil) is a module uses esprima to parse the javascript AST then walks each node and evaluates the result\r\n**Note:**This package has been deprecated.\n\nAffected versions of this package are vulnerable to Sandbox Bypass. It is vulnerable to Sandbox Escape leading to Prototype pollution. The package fails to restrict access to the main context, allowing an attacker to add or modify an object's prototype.\r\n\r\n**Note:**  This vulnerability derives from an incomplete fix in [SNYK-JS-NOTEVIL-608878](https://security.snyk.io/vuln/SNYK-JS-NOTEVIL-608878).\r\n\r\n## PoC:\r\n```js\r\nvar safeEval = require('notevil')\r\n\r\nsafeEval(`  \r\nObject.defineProperty(({})[[\"__proto__\"]][[\"__proto__\"]], 'polluted', {\r\n  value: 'success'\r\n});`);\r\n\r\nconsole.log(polluted);\r\n```\n\n## Details\n\nPrototype Pollution is a vulnerability affecting JavaScript. Prototype Pollution refers to the ability to inject properties into existing JavaScript language construct prototypes, such as objects. JavaScript allows all Object attributes to be altered, including their magical attributes such as `__proto__`, `constructor` and `prototype`. An attacker manipulates these attributes to overwrite, or pollute, a JavaScript application object prototype of the base object by injecting other values.  Properties on the `Object.prototype` are then inherited by all the JavaScript objects through the prototype chain. When that happens, this leads to either denial of service by triggering JavaScript exceptions, or it tampers with the application source code to force the code path that the attacker injects, thereby leading to remote code execution.\n\nThere are two main ways in which the pollution of prototypes occurs:\n\n-   Unsafe `Object` recursive merge\n    \n-   Property definition by path\n    \n\n### Unsafe Object recursive merge\n\nThe logic of a vulnerable recursive merge function follows the following high-level model:\n```\nmerge (target, source)\n\n  foreach property of source\n\n    if property exists and is an object on both the target and the source\n\n      merge(target[property], source[property])\n\n    else\n\n      target[property] = source[property]\n```\n<br>  \n\nWhen the source object contains a property named `__proto__` defined with `Object.defineProperty()` , the condition that checks if the property exists and is an object on both the target and the source passes and the merge recurses with the target, being the prototype of `Object` and the source of `Object` as defined by the attacker. Properties are then copied on the `Object` prototype.\n\nClone operations are a special sub-class of unsafe recursive merges, which occur when a recursive merge is conducted on an empty object: `merge({},source)`.\n\n`lodash` and `Hoek` are examples of libraries susceptible to recursive merge attacks.\n\n### Property definition by path\n\nThere are a few JavaScript libraries that use an API to define property values on an object based on a given path. The function that is generally affected contains this signature: `theFunction(object, path, value)`\n\nIf the attacker can control the value of “path”, they can set this value to `__proto__.myValue`. `myValue` is then assigned to the prototype of the class of the object.\n\n## Types of attacks\n\nThere are a few methods by which Prototype Pollution can be manipulated:\n\n| Type |Origin  |Short description |\n|--|--|--|\n| **Denial of service (DoS)**|Client  |This is the most likely attack. <br>DoS occurs when `Object` holds generic functions that are implicitly called for various operations (for example, `toString` and `valueOf`). <br> The attacker pollutes `Object.prototype.someattr` and alters its state to an unexpected value such as `Int` or `Object`. In this case, the code fails and is likely to cause a denial of service.  <br>**For example:** if an attacker pollutes `Object.prototype.toString` by defining it as an integer, if the codebase at any point was reliant on `someobject.toString()` it would fail. |\n |**Remote Code Execution**|Client|Remote code execution is generally only possible in cases where the codebase evaluates a specific attribute of an object, and then executes that evaluation.<br>**For example:** `eval(someobject.someattr)`. In this case, if the attacker pollutes `Object.prototype.someattr` they are likely to be able to leverage this in order to execute code.|\n|**Property Injection**|Client|The attacker pollutes properties that the codebase relies on for their informative value, including security properties such as cookies or tokens.<br>  **For example:** if a codebase checks privileges for `someuser.isAdmin`, then when the attacker pollutes `Object.prototype.isAdmin` and sets it to equal `true`, they can then achieve admin privileges.|\n\n## Affected environments\n\nThe following environments are susceptible to a Prototype Pollution attack:\n\n-   Application server\n    \n-   Web server\n\n-   Web browser\n    \n\n## How to prevent\n\n1.  Freeze the prototype— use `Object.freeze (Object.prototype)`.\n    \n2.  Require schema validation of JSON input.\n    \n3.  Avoid using unsafe recursive merge functions.\n    \n4.  Consider using objects without prototypes (for example, `Object.create(null)`), breaking the prototype chain and preventing pollution.\n    \n5.  As a best practice use `Map` instead of `Object`.\n\n### For more information on this vulnerability type:\n\n[Arteau, Olivier. “JavaScript prototype pollution attack in NodeJS application.” GitHub, 26 May 2018](https://github.com/HoLyVieR/prototype-pollution-nsec18/blob/master/paper/JavaScript_prototype_pollution_attack_in_NodeJS.pdf)\n\n## Remediation\nThere is no fixed version for `notevil`.\n",
+        "epssDetails": {
+          "percentile": "0.59893",
+          "probability": "0.01013",
+          "modelVersion": "v2026.06.15"
+        },
+        "identifiers": {
+          "CVE": [
+            "CVE-2021-23771"
+          ],
+          "CWE": [
+            "CWE-1321",
+            "CWE-265"
+          ]
+        },
+        "packageName": "notevil",
+        "proprietary": true,
+        "creationTime": "2022-01-27T15:00:51.139678Z",
+        "functions_new": [],
+        "alternativeIds": [],
+        "disclosureTime": "2022-01-27T15:00:48Z",
+        "exploitDetails": {
+          "sources": [
+            "Snyk"
+          ],
+          "maturityLevels": [
+            {
+              "type": "secondary",
+              "level": "Proof of Concept",
+              "format": "CVSSv3"
+            },
+            {
+              "type": "primary",
+              "level": "Proof of Concept",
+              "format": "CVSSv4"
+            }
+          ]
+        },
+        "packageManager": "npm",
+        "publicationTime": "2022-02-14T16:21:53.819915Z",
+        "severityBasedOn": "CVSS",
+        "modificationTime": "2026-08-06T14:03:17.806603Z",
+        "socialTrendAlert": false,
+        "packagePopularityRank": 98,
+        "from": [
+          "juice-shop@20.4.0-SNAPSHOT",
+          "notevil@1.3.3"
+        ],
+        "upgradePath": [],
+        "isUpgradable": false,
+        "isPatchable": false,
+        "isPinnable": false,
+        "isRuntime": false,
+        "name": "notevil",
+        "version": "1.3.3",
+        "severityWithCritical": "medium"
+      },
+      {
+        "id": "SNYK-JS-UUID-16133035",
+        "title": "Improper Validation of Specified Index, Position, or Offset in Input",
+        "CVSSv3": "CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:N/I:L/A:N/E:P",
+        "credit": [
+          "0xStraw-Hat"
+        ],
+        "semver": {
+          "vulnerable": [
+            "<11.1.1",
+            ">=12.0.0 <14.0.0"
+          ]
+        },
+        "exploit": "Proof of Concept",
+        "fixedIn": [
+          "11.1.1",
+          "14.0.0"
+        ],
+        "patches": [],
+        "insights": {
+          "triageAdvice": null
+        },
+        "language": "js",
+        "severity": "medium",
+        "cvssScore": 6.3,
+        "functions": [],
+        "malicious": false,
+        "isDisputed": false,
+        "moduleName": "uuid",
+        "references": [
+          {
+            "url": "https://github.com/uuidjs/uuid/commit/32389c887c9e75f90442ee4cc95bbab0c4e8346e",
+            "title": "GitHub Commit"
+          },
+          {
+            "url": "https://github.com/uuidjs/uuid/commit/3d2c5b0342f0fcb52a5ac681c3d47c13e7444b34",
+            "title": "GitHub Commit"
+          },
+          {
+            "url": "https://github.com/uuidjs/uuid/releases/tag/v14.0.0",
+            "title": "GitHub Release"
+          }
+        ],
+        "cvssDetails": [
+          {
+            "assigner": "NVD",
+            "severity": "high",
+            "cvssV3Vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:H/A:N",
+            "cvssV3BaseScore": 7.5,
+            "modificationTime": "2026-05-12T01:14:02.230690Z"
+          },
+          {
+            "assigner": "Red Hat",
+            "severity": "medium",
+            "cvssV3Vector": "CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:N/I:L/A:L",
+            "cvssV3BaseScore": 4.8,
+            "modificationTime": "2026-05-08T12:59:51.566928Z"
+          }
+        ],
+        "cvssSources": [
+          {
+            "type": "primary",
+            "vector": "CVSS:4.0/AV:N/AC:L/AT:P/PR:N/UI:N/VC:N/VI:L/VA:N/SC:N/SI:N/SA:N/E:P",
+            "assigner": "Snyk",
+            "severity": "medium",
+            "baseScore": 6.3,
+            "cvssVersion": "4.0",
+            "modificationTime": "2026-10-25T14:12:26.263506Z"
+          },
+          {
+            "type": "secondary",
+            "vector": "CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:N/I:L/A:N/E:P",
+            "assigner": "Snyk",
+            "severity": "low",
+            "baseScore": 3.7,
+            "cvssVersion": "3.1",
+            "modificationTime": "2026-10-25T14:12:26.263506Z"
+          },
+          {
+            "type": "secondary",
+            "vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:H/A:N",
+            "assigner": "NVD",
+            "severity": "high",
+            "baseScore": 7.5,
+            "cvssVersion": "3.1",
+            "modificationTime": "2026-05-12T01:14:02.230690Z"
+          },
+          {
+            "type": "secondary",
+            "vector": "CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:N/I:L/A:L",
+            "assigner": "Red Hat",
+            "severity": "medium",
+            "baseScore": 4.8,
+            "cvssVersion": "3.1",
+            "modificationTime": "2026-05-08T12:59:51.566928Z"
+          }
+        ],
+        "description": "## Overview\n[uuid](https://github.com/kelektiv/node-uuid) is a RFC4122 (v1, v4, and v5) compliant UUID library.\n\nAffected versions of this package are vulnerable to Improper Validation of Specified Index, Position, or Offset in Input due to accepting external output buffers but not rejecting out-of-range writes (small `buf` or large `offset`). This inconsistency allows silent partial writes into caller-provided buffers.\n## PoC\n```\r\ncd /home/StrawHat/uuid\r\nnpm ci\r\nnpm run build\r\n\r\nnode --input-type=module -e \"\r\nimport {v4,v5,v6} from './dist-node/index.js';\r\nconst ns='6ba7b810-9dad-11d1-80b4-00c04fd430c8';\r\nfor (const [name,fn] of [\r\n  ['v4',()=>v4({},new Uint8Array(8),4)],\r\n  ['v5',()=>v5('x',ns,new Uint8Array(8),4)],\r\n  ['v6',()=>v6({},new Uint8Array(8),4)],\r\n]) {\r\n  try { fn(); console.log(name,'NO_THROW'); }\r\n  catch(e){ console.log(name,'THREW',e.name); }\r\n}\"\r\n```\n## Remediation\nUpgrade `uuid` to version 11.1.1, 14.0.0 or higher.\n## References\n- [GitHub Commit](https://github.com/uuidjs/uuid/commit/32389c887c9e75f90442ee4cc95bbab0c4e8346e)\n- [GitHub Commit](https://github.com/uuidjs/uuid/commit/3d2c5b0342f0fcb52a5ac681c3d47c13e7444b34)\n- [GitHub Release](https://github.com/uuidjs/uuid/releases/tag/v14.0.0)\n",
+        "epssDetails": {
+          "percentile": "0.28340",
+          "probability": "0.00350",
+          "modelVersion": "v2026.06.15"
+        },
+        "identifiers": {
+          "CVE": [
+            "CVE-2026-41907"
+          ],
+          "CWE": [
+            "CWE-1285"
+          ],
+          "GHSA": [
+            "GHSA-w5hq-g745-h8pq"
+          ]
+        },
+        "packageName": "uuid",
+        "proprietary": false,
+        "creationTime": "2026-04-23T08:34:15.552273Z",
+        "functions_new": [],
+        "alternativeIds": [],
+        "disclosureTime": "2026-04-18T21:00:00Z",
+        "exploitDetails": {
+          "sources": [
+            "Snyk"
+          ],
+          "maturityLevels": [
+            {
+              "type": "secondary",
+              "level": "Proof of Concept",
+              "format": "CVSSv3"
+            },
+            {
+              "type": "primary",
+              "level": "Proof of Concept",
+              "format": "CVSSv4"
+            }
+          ]
+        },
+        "packageManager": "npm",
+        "publicationTime": "2026-04-23T08:34:16.017476Z",
+        "severityBasedOn": "CVSS",
+        "modificationTime": "2026-10-25T14:12:26.263506Z",
+        "socialTrendAlert": false,
+        "packagePopularityRank": 99,
+        "from": [
+          "juice-shop@20.4.0-SNAPSHOT",
+          "sequelize@6.37.8",
+          "uuid@8.3.2"
+        ],
+        "upgradePath": [],
+        "isUpgradable": false,
+        "isPatchable": false,
+        "isPinnable": false,
+        "isRuntime": false,
+        "name": "uuid",
+        "version": "8.3.2",
+        "severityWithCritical": "medium"
+      }
+    ],
+    "upgrade": {
+      "express-jwt@3.0.0": {
+        "upgradeTo": "express-jwt@7.7.8",
+        "upgrades": [
+          "jsonwebtoken@5.0.0",
+          "jsonwebtoken@5.0.0",
+          "jsonwebtoken@5.0.0",
+          "express-jwt@3.0.0"
+        ],
+        "vulns": [
+          "SNYK-JS-JSONWEBTOKEN-3180022",
+          "SNYK-JS-JSONWEBTOKEN-3180024",
+          "SNYK-JS-JSONWEBTOKEN-3180026",
+          "SNYK-JS-EXPRESSJWT-575022"
+        ]
+      },
+      "jsonwebtoken@5.0.0": {
+        "upgradeTo": "jsonwebtoken@9.0.0",
+        "upgrades": [
+          "jsonwebtoken@5.0.0",
+          "jsonwebtoken@5.0.0",
+          "jsonwebtoken@5.0.0"
+        ],
+        "vulns": [
+          "SNYK-JS-JSONWEBTOKEN-3180022",
+          "SNYK-JS-JSONWEBTOKEN-3180024",
+          "SNYK-JS-JSONWEBTOKEN-3180026"
+        ]
+      }
+    },
+    "patch": {},
+    "ignore": {},
+    "pin": {}
+  },
+  "filesystemPolicy": false,
+  "filtered": {
+    "ignore": [],
+    "patch": []
+  },
+  "uniqueCount": 9,
+  "projectName": "juice-shop",
+  "foundProjectCount": 2,
+  "displayTargetFile": "package-lock.json",
+  "hasUnknownVersions": false,
+  "path": "D:\\DevSecOps_P7_SCA\\juice-shop"
+}
